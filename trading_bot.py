@@ -11,7 +11,7 @@ import re
 # --- 1. Dashboard Configuration ---
 st.set_page_config(page_title="AI Trading Engine", layout="wide")
 
-# Custom CSS to hide code elements and style the UI
+# Custom CSS for the English Interface
 st.markdown("""
     <style>
     .main { background-color: #0d1117; }
@@ -36,6 +36,7 @@ st.markdown("""
     }
     .label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; display: block; }
     .value { font-size: 1.25rem; font-weight: bold; font-family: 'Courier New', monospace; }
+    .perc { font-size: 0.85rem; display: block; margin-top: 4px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -78,6 +79,7 @@ if ticker:
         if not stock_data.empty:
             price = float(stock_data['Close'].iloc[-1])
             prev_price = float(stock_data['Close'].iloc[-2])
+            price_change_today = ((price / prev_price) - 1) * 100
             
             # --- METHOD 1: AI SCORING ---
             y = stock_data['Close'].values.reshape(-1, 1)
@@ -99,14 +101,13 @@ if ticker:
             m1_buy_signal = (ensemble > 75) or (lstm_sim > 70) or (sentiment > 75)
 
             # --- METHOD 2: SWING & RISK ---
-            daily_change = ((price / prev_price) - 1) * 100
             volatility = ((stock_data['High'].iloc[-1] - stock_data['Low'].iloc[-1]) / price) * 100
             
-            # Risk Levels
+            # Risk Levels (Based on your Code 2 logic)
             sl_pct = min(max(volatility * 1.5, 2.0), 6.0)
             tp_pct = sl_pct * 2.3
             
-            m2_swing_score = 50 + (daily_change * 6) - (volatility * 2)
+            m2_swing_score = 50 + (price_change_today * 6) - (volatility * 2)
             is_swing_confirmed = m2_swing_score > 60
 
             # --- FINAL DECISION ---
@@ -124,21 +125,34 @@ if ticker:
             earnings = fetch_earnings(ticker)
             st.markdown(f"""
                 <div class="report-container {style}">
-                    <h1 style='margin:0;'>{icon} Recommendation: {status}</h1>
-                    <p style='color:#8b949e; margin-bottom:10px;'>{note}</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h1 style='margin:0;'>{icon} Recommendation: {status}</h1>
+                        <div style="text-align: right;">
+                            <span class="label">Current Price</span>
+                            <span class="value">${price:.2f}</span>
+                            <span style="color: {'#39d353' if price_change_today >= 0 else '#f85149'}; font-size: 0.9em;">
+                                {'+' if price_change_today >= 0 else ''}{price_change_today:.2f}%
+                            </span>
+                        </div>
+                    </div>
+                    <p style='color:#8b949e; margin-top:10px; margin-bottom:10px;'>{note}</p>
                     <span style='font-size:0.9em;'>📅 Next Earnings: <b>{earnings}</b></span>
+                    
                     <div class="price-grid">
                         <div class="price-item">
                             <span class="label">AI Stop Loss</span>
                             <span class="value" style="color:#f85149;">${price * (1 - sl_pct/100):.2f}</span>
+                            <span class="perc" style="color:#f85149;">-{sl_pct:.1f}%</span>
                         </div>
                         <div class="price-item">
-                            <span class="label">Entry Price</span>
+                            <span class="label">Target Entry</span>
                             <span class="value">${price:.2f}</span>
+                            <span class="perc" style="color:#8b949e;">Market Price</span>
                         </div>
                         <div class="price-item">
                             <span class="label">AI Target</span>
                             <span class="value" style="color:#39d353;">${price * (1 + tp_pct/100):.2f}</span>
+                            <span class="perc" style="color:#39d353;">+{tp_pct:.1f}%</span>
                         </div>
                     </div>
                 </div>
@@ -146,8 +160,8 @@ if ticker:
 
             # Metrics
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Ensemble", f"{ensemble}%")
-            c2.metric("LSTM", f"{lstm_sim}%")
+            c1.metric("Ensemble Score", f"{ensemble}%")
+            c2.metric("LSTM Trend", f"{lstm_sim}%")
             c3.metric("Sentiment", f"{sentiment}%")
             c4.metric("Swing Score", f"{m2_swing_score:.1f}%")
             
@@ -155,6 +169,7 @@ if ticker:
 
     except Exception as e:
         st.error(f"Analysis interrupted. Please check the Ticker symbol.")
+
 
 
 
