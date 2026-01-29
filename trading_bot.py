@@ -8,9 +8,9 @@ from bs4 import BeautifulSoup
 import re
 
 # 1. Page Configuration
-st.set_page_config(page_title="AI Trading Pro", layout="wide")
+st.set_page_config(page_title="AI Trading Pro - Refined Risk", layout="wide")
 
-# 2. Hide Code & Style UI
+# 2. Styling
 st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
@@ -58,7 +58,7 @@ def get_sentiment(ticker):
     except: return 50
 
 # 4. Main Logic
-st.title("🏹 AI Strategy Dashboard")
+st.title("🏹 AI Strategy - Refined Risk Engine")
 ticker_symbol = st.text_input("Enter Ticker Symbol", "AAPL").upper()
 
 if ticker_symbol:
@@ -67,12 +67,11 @@ if ticker_symbol:
         df = stock.history(period="100d")
         
         if not df.empty:
-            # Data Points
             current_price = float(df['Close'].iloc[-1])
             last_price = float(df['Close'].iloc[-2])
             day_change = ((current_price / last_price) - 1) * 100
             
-            # Method 1: AI Analysis
+            # AI Analysis (Method 1)
             y = df['Close'].values.reshape(-1, 1)
             X = np.array(range(len(y))).reshape(-1, 1)
             reg = LinearRegression().fit(X, y)
@@ -89,26 +88,33 @@ if ticker_symbol:
             
             m1_confirm = (ensemble > 75) or (lstm_trend > 70) or (sentiment > 75)
 
-            # Method 2: Swing & Risk
-            vola = ((df['High'].iloc[-1] - df['Low'].iloc[-1]) / current_price) * 100
-            sl_pct = min(max(vola * 1.5, 2.0), 6.0)
-            tp_pct = sl_pct * 2.3
-            swing_score = 50 + (day_change * 6) - (vola * 2)
-            m2_confirm = swing_score > 60
+            # --- REFINED RISK LOGIC (Method 2) ---
+            # Using 14-day Volatility (Standard Deviation of daily returns)
+            daily_returns = df['Close'].pct_change()
+            volatility_14d = daily_returns.tail(14).std() * 100
+            
+            # Fine-tuned Stop Loss: Base 1.5% + Volatility component (Capped at 7%)
+            sl_pct = min(max(1.5 + (volatility_14d * 1.2), 2.5), 7.0)
+            
+            # Fine-tuned Target: Reward ratio of 2.5x to ensure positive expectancy
+            tp_pct = sl_pct * 2.5
+            
+            swing_score = 50 + (day_change * 6) - (volatility_14d * 4)
+            m2_confirm = swing_score > 58 # Slightly lower threshold for better entry
 
-            # Final Recommendation Logic
             if m1_confirm and m2_confirm:
                 rec, color, icon = "BUY", "status-buy", "🚀"
-                note = "Dual signal confirmed: AI and Swing models are aligned."
+                note = "Optimal alignment: AI trend and volatility-adjusted momentum confirmed."
             elif m1_confirm and not m2_confirm:
                 rec, color, icon = "HOLD", "status-hold", "⏳"
-                note = "AI is positive, but Swing Score suggests waiting."
+                note = "Positive AI outlook, but waiting for volatility to stabilize for better entry."
             else:
                 rec, color, icon = "AVOID", "status-avoid", "⚠️"
-                note = "No strong buy signals detected."
+                note = "Insufficient data patterns for a high-probability trade."
 
-            # UI Output
             earnings = get_earnings(ticker_symbol)
+            
+            # --- UI Output ---
             st.markdown(f"""
                 <div class="report-container {color}">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -125,9 +131,9 @@ if ticker_symbol:
                     <span style='font-size:0.9em;'>📅 Next Earnings: <b>{earnings}</b></span>
                     <div class="price-grid">
                         <div class="price-item">
-                            <span class="label">AI Stop Loss</span>
+                            <span class="label">Refined Stop Loss</span>
                             <span class="value" style="color:#f85149;">${current_price * (1 - sl_pct/100):.2f}</span>
-                            <span class="perc" style="color:#f85149;">-{sl_pct:.1f}%</span>
+                            <span class="perc" style="color:#f85149;">-{sl_pct:.2f}%</span>
                         </div>
                         <div class="price-item">
                             <span class="label">Entry</span>
@@ -135,25 +141,25 @@ if ticker_symbol:
                             <span class="perc" style="color:#8b949e;">Market Price</span>
                         </div>
                         <div class="price-item">
-                            <span class="label">AI Target</span>
+                            <span class="label">Refined Target</span>
                             <span class="value" style="color:#39d353;">${current_price * (1 + tp_pct/100):.2f}</span>
-                            <span class="perc" style="color:#39d353;">+{tp_pct:.1f}%</span>
+                            <span class="perc" style="color:#39d353;">+{tp_pct:.2f}%</span>
                         </div>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
 
-            # Metrics Row
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Ensemble", f"{ensemble}%")
-            col2.metric("LSTM Trend", f"{lstm_trend}%")
-            col3.metric("Sentiment", f"{sentiment}%")
-            col4.metric("Swing Score", f"{swing_score:.1f}%")
+            col1.metric("AI Confidence", f"{ensemble}%")
+            col2.metric("Trend Momentum", f"{lstm_trend}%")
+            col3.metric("News Sentiment", f"{sentiment}%")
+            col4.metric("Risk Score", f"{swing_score:.1f}")
             
             st.line_chart(df['Close'])
 
     except Exception:
-        st.error("Error analyzing ticker. Please try again.")
+        st.error("Error processing request. Check the ticker symbol.")
+
 
 
 
