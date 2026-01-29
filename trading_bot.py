@@ -5,34 +5,27 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
 import re
 
-# --- 1. Dashboard Configuration ---
-st.set_page_config(page_title="AI Trading Engine", layout="wide")
+# 1. Page Configuration
+st.set_page_config(page_title="AI Trading Pro", layout="wide")
 
-# Custom CSS for the English Interface
+# 2. Hide Code & Style UI
 st.markdown("""
     <style>
-    .main { background-color: #0d1117; }
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
     .report-container { 
-        padding: 25px; 
-        border-radius: 15px; 
-        background-color: #161b22; 
-        color: white; 
-        border-left: 10px solid; 
-        margin-bottom: 25px;
+        padding: 25px; border-radius: 15px; background-color: #161b22; 
+        color: white; border-left: 10px solid; margin-bottom: 25px;
     }
     .status-buy { border-color: #39d353; }
     .status-hold { border-color: #d29922; }
     .status-avoid { border-color: #f85149; }
     .price-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-top: 20px; }
     .price-item { 
-        background: #21262d; 
-        padding: 15px; 
-        border-radius: 10px; 
-        text-align: center; 
-        border: 1px solid #30363d; 
+        background: #21262d; padding: 15px; border-radius: 10px; 
+        text-align: center; border: 1px solid #30363d; 
     }
     .label { font-size: 0.75rem; color: #8b949e; text-transform: uppercase; display: block; }
     .value { font-size: 1.25rem; font-weight: bold; font-family: 'Courier New', monospace; }
@@ -40,25 +33,21 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. Backend Logic Functions ---
-def fetch_earnings(ticker):
+# 3. Helper Functions
+def get_earnings(ticker):
     try:
         url = f"https://finance.yahoo.com/quote/{ticker}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(response.text, 'html.parser')
         text = soup.get_text()
-        if "Earnings Date" in text:
-            match = re.search(r'Earnings Date([A-Za-z0-9\s,]+)', text)
-            if match: return match.group(1).strip().split('-')[0].strip()
-        return "Not Found"
+        match = re.search(r'Earnings Date([A-Za-z0-9\s,]+)', text)
+        return match.group(1).strip().split('-')[0].strip() if match else "N/A"
     except: return "N/A"
 
-def fetch_sentiment(ticker):
+def get_sentiment(ticker):
     try:
         url = f"https://finance.yahoo.com/quote/{ticker}/news"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'})
         soup = BeautifulSoup(response.text, 'html.parser')
         headlines = [h.text.lower() for h in soup.find_all('h3')][:8]
         score = 70
@@ -68,107 +57,103 @@ def fetch_sentiment(ticker):
         return min(98, max(35, score))
     except: return 50
 
-# --- 3. Main Application ---
-st.title("🏹 AI Strategy & Risk Dashboard")
-ticker = st.text_input("Enter Ticker Symbol", "AAPL").upper()
+# 4. Main Logic
+st.title("🏹 AI Strategy Dashboard")
+ticker_symbol = st.text_input("Enter Ticker Symbol", "AAPL").upper()
 
-if ticker:
+if ticker_symbol:
     try:
-        # Data Retrieval
-        stock_data = yf.Ticker(ticker).history(period="100d")
-        if not stock_data.empty:
-            price = float(stock_data['Close'].iloc[-1])
-            prev_price = float(stock_data['Close'].iloc[-2])
-            price_change_today = ((price / prev_price) - 1) * 100
+        stock = yf.Ticker(ticker_symbol)
+        df = stock.history(period="100d")
+        
+        if not df.empty:
+            # Data Points
+            current_price = float(df['Close'].iloc[-1])
+            last_price = float(df['Close'].iloc[-2])
+            day_change = ((current_price / last_price) - 1) * 100
             
-            # --- METHOD 1: AI SCORING ---
-            y = stock_data['Close'].values.reshape(-1, 1)
+            # Method 1: AI Analysis
+            y = df['Close'].values.reshape(-1, 1)
             X = np.array(range(len(y))).reshape(-1, 1)
-            reg_model = LinearRegression().fit(X, y)
-            reg_pred = float(reg_model.predict(np.array([[len(y)]]))[0][0])
+            reg = LinearRegression().fit(X, y)
+            reg_pred = float(reg.predict(np.array([[len(y)]]))[0][0])
             
-            # RSI Calculation
-            diff = stock_data['Close'].diff()
+            diff = df['Close'].diff()
             gain = diff.clip(lower=0).ewm(com=13, adjust=False).mean()
             loss = (-1 * diff.clip(upper=0)).ewm(com=13, adjust=False).mean()
-            rsi = 100 - (100 / (1 + (gain / loss).iloc[-1]))
+            rsi_val = 100 - (100 / (1 + (gain / loss).iloc[-1]))
             
-            # AI Method Scores
-            ensemble = int(72 + (12 if reg_pred > price else -8) + (10 if rsi < 45 else 0))
-            lstm_sim = int(65 + (stock_data['Close'].iloc[-5:].pct_change().sum() * 150))
-            sentiment = fetch_sentiment(ticker)
+            ensemble = int(72 + (12 if reg_pred > current_price else -8) + (10 if rsi_val < 45 else 0))
+            lstm_trend = int(65 + (df['Close'].iloc[-5:].pct_change().sum() * 150))
+            sentiment = get_sentiment(ticker_symbol)
             
-            m1_buy_signal = (ensemble > 75) or (lstm_sim > 70) or (sentiment > 75)
+            m1_confirm = (ensemble > 75) or (lstm_trend > 70) or (sentiment > 75)
 
-            # --- METHOD 2: SWING & RISK ---
-            volatility = ((stock_data['High'].iloc[-1] - stock_data['Low'].iloc[-1]) / price) * 100
-            
-            # Risk Levels (Based on your Code 2 logic)
-            sl_pct = min(max(volatility * 1.5, 2.0), 6.0)
+            # Method 2: Swing & Risk
+            vola = ((df['High'].iloc[-1] - df['Low'].iloc[-1]) / current_price) * 100
+            sl_pct = min(max(vola * 1.5, 2.0), 6.0)
             tp_pct = sl_pct * 2.3
-            
-            m2_swing_score = 50 + (price_change_today * 6) - (volatility * 2)
-            is_swing_confirmed = m2_swing_score > 60
+            swing_score = 50 + (day_change * 6) - (vola * 2)
+            m2_confirm = swing_score > 60
 
-            # --- FINAL DECISION ---
-            if m1_buy_signal and is_swing_confirmed:
-                status, style, icon = "BUY", "status-buy", "🚀"
-                note = "Dual Confirmation: AI metrics and Swing momentum are aligned."
-            elif m1_buy_signal and not is_swing_confirmed:
-                status, style, icon = "HOLD", "status-hold", "⏳"
-                note = "AI is bullish, but Swing score suggests waiting for better momentum."
+            # Final Recommendation Logic
+            if m1_confirm and m2_confirm:
+                rec, color, icon = "BUY", "status-buy", "🚀"
+                note = "Dual signal confirmed: AI and Swing models are aligned."
+            elif m1_confirm and not m2_confirm:
+                rec, color, icon = "HOLD", "status-hold", "⏳"
+                note = "AI is positive, but Swing Score suggests waiting."
             else:
-                status, style, icon = "AVOID", "status-avoid", "⚠️"
-                note = "No significant buy signals detected from AI or Swing models."
+                rec, color, icon = "AVOID", "status-avoid", "⚠️"
+                note = "No strong buy signals detected."
 
-            # Dashboard Output
-            earnings = fetch_earnings(ticker)
+            # UI Output
+            earnings = get_earnings(ticker_symbol)
             st.markdown(f"""
-                <div class="report-container {style}">
+                <div class="report-container {color}">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <h1 style='margin:0;'>{icon} Recommendation: {status}</h1>
+                        <h1 style='margin:0;'>{icon} Recommendation: {rec}</h1>
                         <div style="text-align: right;">
                             <span class="label">Current Price</span>
-                            <span class="value">${price:.2f}</span>
-                            <span style="color: {'#39d353' if price_change_today >= 0 else '#f85149'}; font-size: 0.9em;">
-                                {'+' if price_change_today >= 0 else ''}{price_change_today:.2f}%
+                            <span class="value">${current_price:.2f}</span>
+                            <span style="color: {'#39d353' if day_change >= 0 else '#f85149'}; font-size: 0.9em;">
+                                {'+' if day_change >= 0 else ''}{day_change:.2f}%
                             </span>
                         </div>
                     </div>
-                    <p style='color:#8b949e; margin-top:10px; margin-bottom:10px;'>{note}</p>
+                    <p style='color:#8b949e; margin-top:10px;'>{note}</p>
                     <span style='font-size:0.9em;'>📅 Next Earnings: <b>{earnings}</b></span>
-                    
                     <div class="price-grid">
                         <div class="price-item">
                             <span class="label">AI Stop Loss</span>
-                            <span class="value" style="color:#f85149;">${price * (1 - sl_pct/100):.2f}</span>
+                            <span class="value" style="color:#f85149;">${current_price * (1 - sl_pct/100):.2f}</span>
                             <span class="perc" style="color:#f85149;">-{sl_pct:.1f}%</span>
                         </div>
                         <div class="price-item">
-                            <span class="label">Target Entry</span>
-                            <span class="value">${price:.2f}</span>
+                            <span class="label">Entry</span>
+                            <span class="value">${current_price:.2f}</span>
                             <span class="perc" style="color:#8b949e;">Market Price</span>
                         </div>
                         <div class="price-item">
                             <span class="label">AI Target</span>
-                            <span class="value" style="color:#39d353;">${price * (1 + tp_pct/100):.2f}</span>
+                            <span class="value" style="color:#39d353;">${current_price * (1 + tp_pct/100):.2f}</span>
                             <span class="perc" style="color:#39d353;">+{tp_pct:.1f}%</span>
                         </div>
                     </div>
                 </div>
             """, unsafe_allow_html=True)
 
-            # Metrics
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Ensemble Score", f"{ensemble}%")
-            c2.metric("LSTM Trend", f"{lstm_sim}%")
-            c3.metric("Sentiment", f"{sentiment}%")
-            c4.metric("Swing Score", f"{m2_swing_score:.1f}%")
+            # Metrics Row
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Ensemble", f"{ensemble}%")
+            col2.metric("LSTM Trend", f"{lstm_trend}%")
+            col3.metric("Sentiment", f"{sentiment}%")
+            col4.metric("Swing Score", f"{swing_score:.1f}%")
             
-            st.line_chart(stock_data['Close'])
+            st.line_chart(df['Close'])
 
-    except Exception as e:
-        st.error(f"Analysis interrupted. Please check the Ticker symbol.")
+    except Exception:
+        st.error("Error analyzing ticker. Please try again.")
 
 
 
