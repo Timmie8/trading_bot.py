@@ -10,6 +10,10 @@ import re
 # 1. Page Configuration
 st.set_page_config(page_title="AI Trader Pro", layout="wide")
 
+# INITIALISEER WATCHLIST (Session State)
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = {}
+
 # 2. Styling & Mobile Optimization
 st.markdown("""
     <style>
@@ -68,7 +72,23 @@ def get_sentiment(ticker):
         return min(98, max(35, score))
     except: return 50
 
-# 4. Dashboard Content
+# 4. Sidebar Watchlist
+with st.sidebar:
+    st.header("📋 Watchlist")
+    if st.session_state.watchlist:
+        # Maak een DataFrame voor een mooie weergave
+        df_watch = pd.DataFrame(
+            [(k, f"{v}%") for k, v in st.session_state.watchlist.items()],
+            columns=["Ticker", "Score"]
+        )
+        st.table(df_watch)
+        if st.button("Clear Watchlist"):
+            st.session_state.watchlist = {}
+            st.rerun()
+    else:
+        st.write("No stocks analyzed yet.")
+
+# 5. Dashboard Content
 st.title("🏹 AI Strategy Terminal")
 ticker = st.text_input("Enter Ticker", "AAPL").upper()
 
@@ -90,13 +110,15 @@ if ticker:
             lstm = int(65 + (data['Close'].iloc[-5:].pct_change().sum() * 150))
             sent = get_sentiment(ticker)
             
+            # UPDATE WATCHLIST
+            st.session_state.watchlist[ticker] = ensemble
+            
             vola = data['Close'].pct_change().tail(14).std() * 100
             sl_pct = min(max(1.5 + (vola * 1.2), 2.5), 7.0)
             tp_pct = sl_pct * 2.5
             swing = 50 + (change * 6) - (vola * 4)
             
             earn = get_earnings(ticker)
-            # Alert trigger voor specifieke data (Jan 29/30 enz)
             is_urgent = any(d in earn for d in ["Jan 29", "Jan 30", "Feb 1", "Feb 2"])
 
             # Decision Logic
@@ -154,6 +176,7 @@ if ticker:
 
     except Exception as e:
         st.error(f"Analysis failed: {e}")
+
 
 
 
