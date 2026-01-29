@@ -10,7 +10,7 @@ import re
 # 1. Page Configuration
 st.set_page_config(page_title="AI Trader Pro", layout="wide")
 
-# INITIALISEER WATCHLIST (Session State)
+# INITIALISEER WATCHLIST (Session State voor geheugen)
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = {}
 
@@ -75,23 +75,16 @@ def get_sentiment(ticker):
 # 4. Sidebar Watchlist
 with st.sidebar:
     st.header("📋 Live Watchlist")
-    if st.session_state.watchlist:
-        # Maak DataFrame van de opgeslagen dictionary
-        df_data = []
-        for t, info in st.session_state.watchlist.items():
-            df_data.append({
-                "Ticker": t,
-                "Status": info['rec'],
-                "Swing": f"{info['swing']:.1f}"
-            })
+    if len(st.session_state.watchlist) > 0:
+        # Zet de dictionary om naar een toonbare tabel
+        watch_df = pd.DataFrame.from_dict(st.session_state.watchlist, orient='index')
+        st.table(watch_df)
         
-        st.table(pd.DataFrame(df_data))
-        
-        if st.button("Clear Watchlist"):
+        if st.button("Lijst wissen"):
             st.session_state.watchlist = {}
             st.rerun()
     else:
-        st.write("No stocks analyzed yet.")
+        st.info("Zoek een ticker om toe te voegen aan de lijst.")
 
 # 5. Dashboard Content
 st.title("🏹 AI Strategy Terminal")
@@ -128,10 +121,10 @@ if ticker:
             elif (ensemble > 75 or lstm > 70) and swing > 58: rec, col, ico = "BUY", "status-buy", "🚀"
             else: rec, col, ico = "HOLD", "status-hold", "⏳"
 
-            # UPDATE WATCHLIST (Slaat nu status en swing score op)
+            # BIJWERKEN WATCHLIST (Actualisatie)
             st.session_state.watchlist[ticker] = {
-                'rec': f"{ico} {rec}",
-                'swing': swing
+                "Status": f"{ico} {rec}",
+                "Swing": round(swing, 1)
             }
 
             # UI Output
