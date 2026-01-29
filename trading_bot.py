@@ -5,38 +5,18 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime
-import re
 
-# --- Configuratie ---
-st.set_page_config(page_title="AI Trading Bot v2", layout="wide")
-
-# CSS voor de Tiers (geïnspireerd op je tweede code)
+# --- Layout & Styling ---
+st.set_page_config(page_title="AI Trader Dual-Logic", layout="wide")
 st.markdown("""
 <style>
-    .tier-card { padding: 20px; border-radius: 10px; border-left: 10px solid; margin-bottom: 20px; background-color: #161b22; color: white; }
-    .tier-A { border-color: #39d353; }
-    .tier-B { border-color: #58a6ff; }
-    .tier-C { border-color: #d29922; }
-    .tier-D { border-color: #f85149; }
-    .price-box { font-family: monospace; font-size: 1.2em; font-weight: bold; }
+    .status-card { padding: 20px; border-radius: 15px; margin-bottom: 20px; color: white; border-left: 10px solid; }
+    .buy { background-color: #161b22; border-color: #39d353; }
+    .hold { background-color: #161b22; border-color: #d29922; }
+    .avoid { background-color: #161b22; border-color: #f85149; }
+    .score-badge { background: #21262d; padding: 5px 10px; border-radius: 5px; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
-
-# --- Functies uit Code 1 ---
-def get_earnings_date_live(ticker):
-    try:
-        url = f"https://finance.yahoo.com/quote/{ticker}"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        page_text = soup.get_text()
-        if "Earnings Date" in page_text:
-            match = re.search(r'Earnings Date([A-Za-z0-9\s,]+)', page_text)
-            if match:
-                return match.group(1).strip().split('-')[0].strip()
-        return None
-    except: return None
 
 def get_live_sentiment(ticker):
     try:
@@ -45,121 +25,82 @@ def get_live_sentiment(ticker):
         response = requests.get(url, headers=headers)
         soup = BeautifulSoup(response.text, 'html.parser')
         headlines = [h.text.lower() for h in soup.find_all('h3')][:10]
-        if not headlines: return 50, "NEUTRAL"
-        pos_words = ['growth', 'buy', 'up', 'surge', 'profit', 'positive', 'beat', 'bull', 'strong', 'upgrade']
-        neg_words = ['drop', 'fall', 'sell', 'loss', 'negative', 'miss', 'bear', 'weak', 'risk', 'downgrade']
         score = 70 
         for h in headlines:
-            for word in pos_words:
-                if word in h: score += 3
-            for word in neg_words:
-                if word in h: score -= 3
-        return min(98, max(30, score)), ("POSITIVE" if score > 70 else "NEGATIVE" if score < 45 else "NEUTRAL")
-    except: return 50, "UNAVAILABLE"
+            if any(w in h for w in ['growth', 'buy', 'surge', 'profit']): score += 3
+            if any(w in h for w in ['drop', 'fall', 'sell', 'miss']): score -= 3
+        return min(98, max(30, score))
+    except: return 50
 
-# --- Main App ---
-st.title("🏹 AI Trading Bot: Strategy & Risk Integration")
-ticker_input = st.text_input("Voer Ticker in (bijv. NVDA, AAPL)", "AAPL").upper()
+# --- App Logic ---
+st.title("🏹 AI Strategy + Tier Verification")
+ticker_input = st.text_input("Voer Ticker in", "AAPL").upper()
 
 if ticker_input:
     try:
-        # 1. Data ophalen
-        ticker_obj = yf.Ticker(ticker_input)
-        data = ticker_obj.history(period="100d")
-        
-        if data.empty:
-            st.error("Geen data gevonden.")
-        else:
-            current_price = float(data['Close'].iloc[-1])
+        data = yf.Ticker(ticker_input).history(period="100d")
+        if not data.empty:
+            curr_price = float(data['Close'].iloc[-1])
             
-            # --- Berekeningen Code 1 ---
-            # ATR voor volatiliteit
-            high_low = data['High'] - data['Low']
-            atr = high_low.rolling(14).mean().iloc[-1]
-            volatility_perc = (atr / current_price) * 100
-
-            # RSI & Regressie
+            # --- METHODE 1: VOLLEDIGE AI LOGICA ---
+            # Linear Regression (Trend)
+            y_reg = data['Close'].values.reshape(-1, 1)
+            X_reg = np.array(range(len(y_reg))).reshape(-1, 1)
+            model = LinearRegression().fit(X_reg, y_reg)
+            pred = float(model.predict(np.array([[len(y_reg)]]))[0][0])
+            
+            # RSI
             delta = data['Close'].diff()
             up, down = delta.clip(lower=0), -1 * delta.clip(upper=0)
             ema_up = up.ewm(com=13, adjust=False).mean()
             ema_down = down.ewm(com=13, adjust=False).mean()
             rsi = float(100 - (100 / (1 + (ema_up / ema_down).iloc[-1])))
             
-            y_reg = data['Close'].values.reshape(-1, 1)
-            X_reg = np.array(range(len(y_reg))).reshape(-1, 1)
-            model = LinearRegression().fit(X_reg, y_reg)
-            pred_price = float(model.predict(np.array([[len(y_reg)]]))[0][0])
-
-            # Scores
-            sentiment_score, sentiment_status = get_live_sentiment(ticker_input)
+            # AI Scores berekenen (zoals in code 1)
+            ensemble_score = int(72 + (12 if pred > curr_price else -8) + (10 if rsi < 45 else 0))
+            last_5_days_pct = data['Close'].iloc[-5:].pct_change().sum()
+            lstm_score = int(65 + (last_5_days_pct * 150))
+            sentiment_score = get_live_sentiment(ticker_input)
             
-            # Aantal BUY signalen tellen van Code 1
-            buy_signals = 0
-            if pred_price > current_price: buy_signals += 1
-            if rsi < 45: buy_signals += 1
-            if sentiment_score > 75: buy_signals += 1
-            
-            # --- Logica Code 2: Risk & Tier Systeem ---
-            # Score berekening gebaseerd op Code 2 logica
-            price_change = ((current_price / data['Close'].iloc[-2]) - 1) * 100
-            risk_score = 50 + (price_change * 6) - (volatility_perc * 2)
-            risk_score = min(max(risk_score, 1), 99)
+            # Check of Methode 1 een BUY signaal geeft
+            m1_buy_signal = (ensemble_score > 75) or (lstm_score > 70) or (sentiment_score > 75)
 
-            # Dynamische Stoploss en Target (1.5x vola stop, 2.3 RR)
-            dyn_stop_perc = min(max(volatility_perc * 1.5, 2.0), 6.0)
-            dyn_target_perc = dyn_stop_perc * 2.3
+            # --- METHODE 2: TIER & SWING LOGICA ---
+            change = ((curr_price / data['Close'].iloc[-2]) - 1) * 100
+            vola = ((data['High'].iloc[-1] - data['Low'].iloc[-1]) / curr_price) * 100
             
-            stop_price = current_price * (1 - dyn_stop_perc/100)
-            target_price = current_price * (1 + dyn_target_perc/100)
+            # Swing Score (gebaseerd op code 2)
+            m2_swing_score = 50 + (change * 6) - (vola * 2)
+            is_swing_valid = m2_swing_score > 60
 
-            # Tier bepaling
-            if risk_score > 75 and volatility_perc < 4 and buy_signals >= 2:
-                tier, status, t_color, t_msg = "A", "BUY (SWING)", "tier-A", "Perfecte setup, momentum is krachtig."
-            elif risk_score > 60 and buy_signals >= 1:
-                tier, status, t_color, t_msg = "B", "BUY (SWING)", "tier-B", "Trend sterk, let op de pullbacks."
-            elif risk_score < 40 or volatility_perc > 7:
-                tier, status, t_color, t_msg = "D", "AVOID", "tier-D", "Trend onzeker of te volatiel. Vermijd."
+            # --- FINALE BESLISSING ---
+            if m1_buy_signal and is_swing_valid:
+                res, css, icon = "BUY", "buy", "🚀"
+                advies = "De AI ziet sterke patronen én de Swing-logica bevestigt het momentum."
+            elif m1_buy_signal and not is_swing_valid:
+                res, css, icon = "HOLD", "hold", "⏳"
+                advies = "De AI is positief, maar de Swing-score is te laag (te veel risico/volatiliteit)."
             else:
-                tier, status, t_color, t_msg = "C", "HOLD", "tier-C", "Geen duidelijk signaal, wacht af."
+                res, css, icon = "AVOID", "avoid", "⚠️"
+                advies = "Geen koop-signalen van de AI methodes gevonden."
 
-            # --- Visuele Weergave ---
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
-                st.markdown(f"""
-                <div class="tier-card {t_color}">
-                    <h3>Tier {tier}: {status}</h3>
-                    <p><i>{t_msg}</i></p>
-                    <hr>
-                    <div style="display: flex; justify-content: space-between;">
-                        <div>
-                            <small>HUIDIGE PRIJS</small><br>
-                            <span class="price-box">${current_price:.2f}</span>
-                        </div>
-                        <div>
-                            <small style="color: #f85149;">AI STOPLOSS</small><br>
-                            <span class="price-box" style="color: #f85149;">${stop_price:.2f} (-{dyn_stop_perc:.1f}%)</span>
-                        </div>
-                        <div>
-                            <small style="color: #39d353;">AI TARGET</small><br>
-                            <span class="price-box" style="color: #39d353;">${target_price:.2f} (+{dyn_target_perc:.1f}%)</span>
-                        </div>
-                    </div>
+            # --- UI OUTPUT ---
+            st.markdown(f"""
+            <div class="status-card {css}">
+                <h1>{icon} Besluit: {res}</h1>
+                <p>{advies}</p>
+                <hr>
+                <div style="display: flex; justify-content: space-between;">
+                    <span><b>Ensemble:</b> {ensemble_score}%</span>
+                    <span><b>LSTM:</b> {lstm_score}%</span>
+                    <span><b>Sentiment:</b> {sentiment_score}%</span>
+                    <span><b>Swing Score:</b> {m2_swing_score:.1f}%</span>
                 </div>
-                """, unsafe_allow_html=True)
-
-                st.line_chart(data['Close'])
-
-            with col2:
-                st.subheader("Analyse Details")
-                st.write(f"**Sentiment:** {sentiment_status} ({sentiment_score}%)")
-                st.write(f"**RSI:** {rsi:.1f}")
-                st.write(f"**Volatiliteit:** {volatility_perc:.2f}%")
-                st.write(f"**Regressie Target:** ${pred_price:.2f}")
-                
-                earnings_date = get_earnings_date_live(ticker_input)
-                if earnings_date:
-                    st.warning(f"📅 Earnings: {earnings_date}")
-
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.line_chart(data['Close'])
+            
     except Exception as e:
-        st.error(f"Fout bij verwerken: {e}")
+        st.error(f"Fout: {e}")
+
