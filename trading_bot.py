@@ -74,14 +74,19 @@ def get_sentiment(ticker):
 
 # 4. Sidebar Watchlist
 with st.sidebar:
-    st.header("📋 Watchlist")
+    st.header("📋 Live Watchlist")
     if st.session_state.watchlist:
-        # Maak een DataFrame voor een mooie weergave
-        df_watch = pd.DataFrame(
-            [(k, f"{v}%") for k, v in st.session_state.watchlist.items()],
-            columns=["Ticker", "Score"]
-        )
-        st.table(df_watch)
+        # Maak DataFrame van de opgeslagen dictionary
+        df_data = []
+        for t, info in st.session_state.watchlist.items():
+            df_data.append({
+                "Ticker": t,
+                "Status": info['rec'],
+                "Swing": f"{info['swing']:.1f}"
+            })
+        
+        st.table(pd.DataFrame(df_data))
+        
         if st.button("Clear Watchlist"):
             st.session_state.watchlist = {}
             st.rerun()
@@ -110,9 +115,6 @@ if ticker:
             lstm = int(65 + (data['Close'].iloc[-5:].pct_change().sum() * 150))
             sent = get_sentiment(ticker)
             
-            # UPDATE WATCHLIST
-            st.session_state.watchlist[ticker] = ensemble
-            
             vola = data['Close'].pct_change().tail(14).std() * 100
             sl_pct = min(max(1.5 + (vola * 1.2), 2.5), 7.0)
             tp_pct = sl_pct * 2.5
@@ -125,6 +127,12 @@ if ticker:
             if is_urgent: rec, col, ico = "AVOID", "status-avoid", "⚠️"
             elif (ensemble > 75 or lstm > 70) and swing > 58: rec, col, ico = "BUY", "status-buy", "🚀"
             else: rec, col, ico = "HOLD", "status-hold", "⏳"
+
+            # UPDATE WATCHLIST (Slaat nu status en swing score op)
+            st.session_state.watchlist[ticker] = {
+                'rec': f"{ico} {rec}",
+                'swing': swing
+            }
 
             # UI Output
             if is_urgent:
@@ -176,6 +184,7 @@ if ticker:
 
     except Exception as e:
         st.error(f"Analysis failed: {e}")
+
 
 
 
