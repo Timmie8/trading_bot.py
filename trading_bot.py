@@ -19,12 +19,11 @@ def load_watchlist():
         with open("watchlist.txt", "r") as f:
             data = f.read().strip()
             return data.split(",") if data else []
-    return ["AAPL", "TSLA"] # Standaard als bestand niet bestaat
+    return ["AAPL", "TSLA"]
 
-# 1. Pagina Configuratie
+# 1. Pagina Configuratie & Styling
 st.set_page_config(page_title="AI Trader Pro - Live", layout="wide")
 
-# 2. Harde Reset Styling
 st.markdown("""
     <style>
     .stApp { background-color: #000000 !important; color: #ffffff !important; }
@@ -33,15 +32,25 @@ st.markdown("""
         background-color: #222 !important; color: white !important; 
         border: 1px solid #444 !important; font-weight: bold;
     }
-    input { background-color: #111 !important; color: white !important; }
+    input, textarea { background-color: #111 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Watchlist Geheugen (Laden uit bestand bij opstart)
+# 2. Watchlist Geheugen
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = load_watchlist()
 
-# 4. AI Logica (Ongewijzigd)
+# 3. Scrapers & AI Logica
+def get_earnings(ticker):
+    try:
+        url = f"https://finance.yahoo.com/quote/{ticker}"
+        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        text = soup.get_text()
+        match = re.search(r'Earnings Date([A-Za-z0-9\s,]+)', text)
+        return match.group(1).strip().split('-')[0].strip() if match else "N/A"
+    except: return "N/A"
+
 def run_full_analysis(ticker):
     try:
         data = yf.Ticker(ticker).history(period="100d")
@@ -59,33 +68,38 @@ def run_full_analysis(ticker):
         lstm = int(65 + (data['Close'].iloc[-5:].pct_change().sum() * 150))
         vola = data['Close'].pct_change().tail(14).std() * 100
         swing = 50 + (change * 6) - (vola * 4)
+        earn = get_earnings(ticker)
         
-        if (ensemble > 75 or lstm > 70) and swing > 58: rec, col = "BUY", "#39d353"
+        # Urgentie check voor Earnings (AVOID status)
+        is_urgent = any(d in earn for d in ["Feb 3", "Feb 4", "Feb 5", "Feb 6"])
+        
+        if is_urgent: rec, col = "AVOID", "#f85149"
+        elif (ensemble > 75 or lstm > 70) and swing > 58: rec, col = "BUY", "#39d353"
         elif ensemble < 65: rec, col = "AVOID", "#f85149"
         else: rec, col = "HOLD", "#d29922"
         
         return {
             "Ticker": ticker, "Prijs": curr_p, "Change": change,
-            "Ensemble": ensemble, "LSTM": lstm, "Swing": round(swing, 1),
-            "Status": rec, "Kleur": col
+            "Ensemble": ensemble, "Swing": round(swing, 1),
+            "Status": rec, "Kleur": col, "Earnings": earn
         }
     except: return None
 
-# 5. Sidebar
+# 4. Sidebar
 with st.sidebar:
     st.header("📋 Watchlist")
     multi_input = st.text_area("Voeg tickers toe", placeholder="NVDA, MSFT")
     if st.button("Toevoegen"):
         new = [t.strip().upper() for t in multi_input.split(",") if t.strip()]
         st.session_state.watchlist = list(dict.fromkeys(st.session_state.watchlist + new))
-        save_watchlist(st.session_state.watchlist) # Opslaan in bestand
+        save_watchlist(st.session_state.watchlist)
         st.rerun()
     if st.button("Lijst Wissen"):
         st.session_state.watchlist = []
-        save_watchlist([]) # Leegmaken in bestand
+        save_watchlist([])
         st.rerun()
 
-# 6. Dashboard
+# 5. Dashboard
 st.title("🏹 AI Strategy Terminal")
 
 # DIRECTE SCAN SECTIE
@@ -99,25 +113,26 @@ if scan_ticker:
             <div style="border: 2px solid {border_color}; padding: 20px; border-radius: 10px; background-color: #111;">
                 <h2 style="color:{s['Kleur']} !important; margin:0;">{s['Status']}: {s['Ticker']}</h2>
                 <h3 style="margin:0;">${s['Prijs']:.2f} ({s['Change']:+.2f}%)</h3>
-                <p>AI Score: {s['Ensemble']}% | LSTM: {s['LSTM']}% | Swing: {s['Swing']}</p>
+                <p>AI Score: {s['Ensemble']}% | Swing: {s['Swing']} | 📅 Earnings: <b>{s['Earnings']}</b></p>
             </div>
         """, unsafe_allow_html=True)
 
 st.write("---")
 
-# LIVE WATCHLIST SECTIE
+# 6. LIVE WATCHLIST SECTIE
 @st.fragment(run_every=10)
 def show_watchlist():
-    st.subheader("🔄 Live Watchlist (Update elke 10s)")
+    st.subheader("🔄 Live Watchlist")
     if not st.session_state.watchlist:
         st.info("Lijst is leeg.")
         return
 
+    # Tabel Koppen inclusief Earnings
     st.markdown("""
         <div style="display: flex; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 5px; color: #39d353;">
-            <div style="width: 20%;">Ticker</div><div style="width: 20%;">Prijs</div>
-            <div style="width: 20%;">Score</div><div style="width: 20%;">Swing</div>
-            <div style="width: 20%;">Status</div>
+            <div style="width: 15%;">Ticker</div><div style="width: 15%;">Prijs</div>
+            <div style="width: 15%;">AI Score</div><div style="width: 15%;">Swing</div>
+            <div style="width: 20%;">Status</div><div style="width: 20%;">Earnings</div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -127,11 +142,12 @@ def show_watchlist():
             row_style = f"border: 2px solid #39d353; background-color: rgba(57, 211, 83, 0.1);" if data['Status'] == "BUY" else "border: 1px solid #222;"
             st.markdown(f"""
                 <div style="display: flex; align-items: center; padding: 10px; margin-top: 5px; border-radius: 5px; {row_style}">
-                    <div style="width: 20%;"><b>{data['Ticker']}</b></div>
-                    <div style="width: 20%;">${data['Prijs']:.2f}</div>
-                    <div style="width: 20%;">{data['Ensemble']}%</div>
-                    <div style="width: 20%;">{data['Swing']}</div>
+                    <div style="width: 15%;"><b>{data['Ticker']}</b></div>
+                    <div style="width: 15%;">${data['Prijs']:.2f}</div>
+                    <div style="width: 15%;">{data['Ensemble']}%</div>
+                    <div style="width: 15%;">{data['Swing']}</div>
                     <div style="width: 20%; color:{data['Kleur']}; font-weight:bold;">{data['Status']}</div>
+                    <div style="width: 20%; font-size: 0.85em;">{data['Earnings']}</div>
                 </div>
             """, unsafe_allow_html=True)
 
