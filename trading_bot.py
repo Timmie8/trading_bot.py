@@ -7,31 +7,41 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
+import os
+
+# --- OPSLAG LOGICA ---
+def save_watchlist(watchlist):
+    with open("watchlist.txt", "w") as f:
+        f.write(",".join(watchlist))
+
+def load_watchlist():
+    if os.path.exists("watchlist.txt"):
+        with open("watchlist.txt", "r") as f:
+            data = f.read().strip()
+            return data.split(",") if data else []
+    return ["AAPL", "TSLA"] # Standaard als bestand niet bestaat
 
 # 1. Pagina Configuratie
 st.set_page_config(page_title="AI Trader Pro - Live", layout="wide")
 
-# 2. Harde Reset Styling (Zwart scherm forceren)
+# 2. Harde Reset Styling
 st.markdown("""
     <style>
     .stApp { background-color: #000000 !important; color: #ffffff !important; }
     [data-testid="stSidebar"] { background-color: #050505 !important; border-right: 1px solid #333 !important; }
-    /* Knoppen contrast */
     .stButton>button { 
         background-color: #222 !important; color: white !important; 
         border: 1px solid #444 !important; font-weight: bold;
     }
-    .stButton>button:hover { border-color: #39d353 !important; color: #39d353 !important; }
-    /* Input tekst wit maken */
     input { background-color: #111 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Watchlist Geheugen (Lijst formaat)
-if 'watchlist' not in st.session_state or not isinstance(st.session_state.watchlist, list):
-    st.session_state.watchlist = ["AAPL", "TSLA"]
+# 3. Watchlist Geheugen (Laden uit bestand bij opstart)
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = load_watchlist()
 
-# 4. AI Logica (Exacte kopie van jouw basis)
+# 4. AI Logica (Ongewijzigd)
 def run_full_analysis(ticker):
     try:
         data = yf.Ticker(ticker).history(period="100d")
@@ -64,13 +74,15 @@ def run_full_analysis(ticker):
 # 5. Sidebar
 with st.sidebar:
     st.header("📋 Watchlist")
-    multi_input = st.text_area("Voeg tickers toe (komma gescheiden)", placeholder="NVDA, MSFT, BTC-USD")
+    multi_input = st.text_area("Voeg tickers toe", placeholder="NVDA, MSFT")
     if st.button("Toevoegen"):
         new = [t.strip().upper() for t in multi_input.split(",") if t.strip()]
         st.session_state.watchlist = list(dict.fromkeys(st.session_state.watchlist + new))
+        save_watchlist(st.session_state.watchlist) # Opslaan in bestand
         st.rerun()
     if st.button("Lijst Wissen"):
         st.session_state.watchlist = []
+        save_watchlist([]) # Leegmaken in bestand
         st.rerun()
 
 # 6. Dashboard
@@ -82,7 +94,6 @@ scan_ticker = st.text_input("Voer ticker in voor snelle analyse", "AAPL").upper(
 if scan_ticker:
     s = run_full_analysis(scan_ticker)
     if s:
-        # Groene rand als Status BUY is
         border_color = s['Kleur'] if s['Status'] == "BUY" else "#333"
         st.markdown(f"""
             <div style="border: 2px solid {border_color}; padding: 20px; border-radius: 10px; background-color: #111;">
@@ -102,7 +113,6 @@ def show_watchlist():
         st.info("Lijst is leeg.")
         return
 
-    # Tabel Koppen
     st.markdown("""
         <div style="display: flex; font-weight: bold; border-bottom: 2px solid #333; padding-bottom: 5px; color: #39d353;">
             <div style="width: 20%;">Ticker</div><div style="width: 20%;">Prijs</div>
@@ -114,9 +124,7 @@ def show_watchlist():
     for t in st.session_state.watchlist:
         data = run_full_analysis(t)
         if data:
-            # Groene rand forceren bij BUY
             row_style = f"border: 2px solid #39d353; background-color: rgba(57, 211, 83, 0.1);" if data['Status'] == "BUY" else "border: 1px solid #222;"
-            
             st.markdown(f"""
                 <div style="display: flex; align-items: center; padding: 10px; margin-top: 5px; border-radius: 5px; {row_style}">
                     <div style="width: 20%;"><b>{data['Ticker']}</b></div>
@@ -128,6 +136,7 @@ def show_watchlist():
             """, unsafe_allow_html=True)
 
 show_watchlist()
+
 
 
 
