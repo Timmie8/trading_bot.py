@@ -8,144 +8,99 @@ from bs4 import BeautifulSoup
 import re
 import time
 
-# 1. Page Configuration
+# 1. Pagina configuratie
 st.set_page_config(page_title="AI Trader Pro", layout="wide")
 
-# INITIALISEER WATCHLIST (Session State voor geheugen)
-if 'watchlist_data' not in st.session_state:
-    st.session_state.watchlist_data = pd.DataFrame(columns=["Ticker", "Prijs", "Change %", "Status"])
+# INITIALISEER WATCHLIST (Session State)
+if 'watchlist' not in st.session_state:
+    st.session_state.watchlist = ["AAPL", "TSLA"] # Standaard tickers
 
-# 2. Styling
-st.markdown("""
-    <style>
-    .report-container { 
-        padding: 15px; border-radius: 12px; background-color: #161b22; 
-        color: white; border-left: 8px solid; margin-bottom: 10px;
-    }
-    .status-buy { border-color: #39d353; }
-    .status-hold { border-color: #d29922; }
-    .status-avoid { border-color: #f85149; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# 3. Hulpfuncties voor Analyse
-def get_earnings(ticker):
+# 2. Hulpfuncties voor Analyse
+def get_analysis(ticker_symbol):
+    """Haalt data op en berekent scores voor één specifiek aandeel."""
     try:
-        url = f"https://finance.yahoo.com/quote/{ticker}"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        text = soup.get_text()
-        match = re.search(r'Earnings Date([A-Za-z0-9\s,]+)', text)
-        return match.group(1).strip().split('-')[0].strip() if match else "N/A"
-    except: return "N/A"
-
-def get_sentiment(ticker):
-    try:
-        url = f"https://finance.yahoo.com/quote/{ticker}/news"
-        res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        headlines = [h.text.lower() for h in soup.find_all('h3')][:5]
-        score = 70
-        for h in headlines:
-            if any(w in h for w in ['growth', 'buy', 'surge', 'profit']): score += 3
-            if any(w in h for w in ['drop', 'fall', 'sell', 'miss']): score -= 3
-        return min(98, max(35, score))
-    except: return 50
-
-def analyze_ticker(ticker_symbol):
-    """Voert de volledige analyse uit voor één ticker."""
-    data = yf.Ticker(ticker_symbol).history(period="100d")
-    if data.empty:
-        return None
-    
-    curr_p = float(data['Close'].iloc[-1])
-    prev_p = float(data['Close'].iloc[-2])
-    change = ((curr_p / prev_p) - 1) * 100
-    
-    # AI Logica (Linear Regression)
-    y = data['Close'].values.reshape(-1, 1)
-    X = np.array(range(len(y))).reshape(-1, 1)
-    reg = LinearRegression().fit(X, y)
-    pred = float(reg.predict(np.array([[len(y)]]))[0][0])
-    
-    ensemble = int(72 + (12 if pred > curr_p else -8))
-    lstm = int(65 + (data['Close'].iloc[-5:].pct_change().sum() * 150))
-    
-    earn = get_earnings(ticker_symbol)
-    # Simpele check voor urgentie (aanpasbaar)
-    is_urgent = "Feb" in earn or "Jan" in earn 
-
-    if is_urgent: rec, col, ico = "AVOID", "status-avoid", "⚠️"
-    elif (ensemble > 75 or lstm > 70): rec, col, ico = "BUY", "status-buy", "🚀"
-    else: rec, col, ico = "HOLD", "status-hold", "⏳"
-    
-    return {
-        "Ticker": ticker_symbol,
-        "Prijs": round(curr_p, 2),
-        "Change %": round(change, 2),
-        "Status": f"{ico} {rec}",
-        "Color": col,
-        "Data": data
-    }
-
-# 4. Sidebar Watchlist
-with st.sidebar:
-    st.header("📋 Live Watchlist")
-    
-    # Input voor meerdere tickers
-    new_tickers = st.text_input("Voeg tickers toe (scheid met komma)", "AAPL, TSLA, NVDA")
-    
-    if st.button("Update/Start Watchlist"):
-        ticker_list = [t.strip().upper() for t in new_tickers.split(",")]
-        results = []
-        for t in ticker_list:
-            res = analyze_ticker(t)
-            if res:
-                results.append({
-                    "Ticker": res["Ticker"],
-                    "Prijs": res["Prijs"],
-                    "Change %": res["Change %"],
-                    "Status": res["Status"]
-                })
-        st.session_state.watchlist_data = pd.DataFrame(results)
-
-    # Toon de watchlist
-    if not st.session_state.watchlist_data.empty:
-        st.dataframe(st.session_state.watchlist_data, hide_index=True)
+        data = yf.Ticker(ticker_symbol).history(period="100d")
+        if data.empty: return None
         
-        if st.button("Lijst wissen"):
-            st.session_state.watchlist_data = pd.DataFrame(columns=["Ticker", "Prijs", "Change %", "Status"])
-            st.rerun()
+        curr_p = float(data['Close'].iloc[-1])
+        prev_p = float(data['Close'].iloc[-2])
+        change = ((curr_p / prev_p) - 1) * 100
+        
+        # AI Trend (Linear Regression)
+        y = data['Close'].values.reshape(-1, 1)
+        X = np.array(range(len(y))).reshape(-1, 1)
+        reg = LinearRegression().fit(X, y)
+        pred = float(reg.predict(np.array([[len(y)]]))[0][0])
+        
+        score = 70 + (10 if pred > curr_p else -10)
+        rec = "BUY" if score > 75 else "HOLD"
+        col = "#39d353" if rec == "BUY" else "#d29922"
+        
+        return {
+            "Ticker": ticker_symbol,
+            "Prijs": f"${curr_p:.2f}",
+            "Change": f"{change:+.2f}%",
+            "Advies": rec,
+            "Kleur": col,
+            "History": data['Close']
+        }
+    except:
+        return None
 
-# 5. Dashboard Content
+# 3. Sidebar voor invoer
+with st.sidebar:
+    st.header("⚙️ Instellingen")
+    
+    # Mogelijkheid om meerdere aandelen tegelijk in te voeren
+    input_tickers = st.text_area("Voer tickers in (scheid met komma of spatie)", 
+                                 value=", ".join(st.session_state.watchlist))
+    
+    if st.button("Watchlist Bijwerken"):
+        # Schoon de input op: splits op komma, verwijder spaties, maak hoofdletters
+        new_list = [t.strip().upper() for t in re.split(r'[,\s]+', input_tickers) if t.strip()]
+        st.session_state.watchlist = list(dict.fromkeys(new_list)) # Verwijder dubbelen
+        st.rerun()
+
+    st.write("---")
+    st.write("⏱️ *De pagina ververst elke 30 seconden automatisch voor live prijzen.*")
+
+# 4. Hoofd Dashboard (De "Live" Watchlist)
 st.title("🏹 AI Strategy Terminal")
 
-# Als er tickers in de lijst staan, toon ze op het hoofdscherm
-if not st.session_state.watchlist_data.empty:
-    for _, row in st.session_state.watchlist_data.iterrows():
-        # Haal verse data op voor het hoofdscherm
-        analysis = analyze_ticker(row['Ticker'])
+# We maken een grid/tabel voor de live watchlist bovenin
+if st.session_state.watchlist:
+    st.subheader("📋 Live Overzicht")
+    
+    # Verzamel data voor alle tickers
+    live_results = []
+    for t in st.session_state.watchlist:
+        res = get_analysis(t)
+        if res:
+            live_results.append(res)
+    
+    if live_results:
+        # Maak een mooie tabel van de huidige watchlist data
+        df_display = pd.DataFrame(live_results).drop(columns=['History', 'Kleur'])
+        st.table(df_display)
         
-        if analysis:
-            with st.expander(f"Details voor {analysis['Ticker']} - {analysis['Status']}", expanded=True):
+        # Toon gedetailleerde kaarten per aandeel
+        st.write("---")
+        cols = st.columns(len(live_results))
+        for i, item in enumerate(live_results):
+            with cols[i % len(cols)]:
                 st.markdown(f"""
-                    <div class="report-container {analysis['Color']}">
-                        <div style="display: flex; justify-content: space-between;">
-                            <h3>{analysis['Ticker']} - ${analysis['Prijs']}</h3>
-                            <h3 style="color:{'#39d353' if analysis['Change %'] >= 0 else '#f85149'}">{analysis['Change %']}%</h3>
-                        </div>
+                    <div style="padding:10px; border-radius:10px; background-color:#161b22; border-left: 5px solid {item['Kleur']};">
+                        <h4 style="margin:0;">{item['Ticker']}</h4>
+                        <p style="font-size:1.2em; font-weight:bold; margin:0;">{item['Prijs']}</p>
+                        <p style="color:{item['Kleur']}; margin:0;">{item['Advies']} ({item['Change']})</p>
                     </div>
                 """, unsafe_allow_html=True)
-                st.line_chart(analysis['Data']['Close'], height=150)
-else:
-    st.info("Voer tickers in de sidebar in om de analyse te starten.")
 
-# Automatische verversing (elke 60 seconden)
-# Dit is een simpele manier om Streamlit te triggeren
-time.sleep(1) # Voorkomt CPU overbelasting
-if st.checkbox("Live Updates inschakelen (elke 60s)"):
-    time.sleep(60)
-    st.rerun()
+# 5. Automatische Refresh Logica
+# Dit zorgt ervoor dat de watchlist 'live' blijft
+time.sleep(30)
+st.rerun()
+
 
 
 
