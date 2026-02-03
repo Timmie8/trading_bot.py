@@ -9,7 +9,7 @@ import re
 import time
 import os
 
-# --- GEHEUGEN FUNCTIES ---
+# --- PERSISTENTIE LOGICA ---
 def save_watchlist(watchlist):
     with open("watchlist_data.txt", "w") as f:
         f.write(",".join(watchlist))
@@ -22,9 +22,9 @@ def load_watchlist():
     return ["AAPL", "TSLA", "NVDA"]
 
 # 1. Pagina Setup
-st.set_page_config(page_title="AI Strategy Terminal", layout="wide")
+st.set_page_config(page_title="AI Trader Pro", layout="wide")
 
-# 2. Harde CSS Injectie (Focus op Zwart & Contrast)
+# 2. Harde CSS voor Zwarte Layout
 st.markdown("""
     <style>
     .stApp { background-color: #000000 !important; color: #ffffff !important; }
@@ -35,11 +35,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# 3. Initialisatie
+# 3. Watchlist Laden
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = load_watchlist()
 
-# 4. Data & AI Functies
+# 4. Scrapers & AI Berekeningen
 def get_earnings_date(ticker):
     try:
         url = f"https://finance.yahoo.com/quote/{ticker}"
@@ -58,29 +58,38 @@ def run_analysis(ticker):
         prev_p = float(data['Close'].iloc[-2])
         change = ((curr_p / prev_p) - 1) * 100
         
-        # AI Predictie
+        # --- AI BEREKENINGEN (GELIJK AAN BASISCODE) ---
         y = data['Close'].values.reshape(-1, 1)
         X = np.array(range(len(y))).reshape(-1, 1)
         reg = LinearRegression().fit(X, y)
         pred = float(reg.predict(np.array([[len(y)]]))[0][0])
         
         ensemble = int(72 + (12 if pred > curr_p else -8))
+        # LSTM simulatie op basis van momentum
+        lstm = int(65 + (data['Close'].iloc[-5:].pct_change().sum() * 150))
         vola = data['Close'].pct_change().tail(14).std() * 100
         swing = round(50 + (change * 6) - (vola * 4), 1)
         earn = get_earnings_date(ticker)
         
-        # Kleur & Status
-        if ensemble > 75 and swing > 58: rec, col = "BUY", "#39d353"
-        elif ensemble < 65: rec, col = "AVOID", "#f85149"
-        else: rec, col = "HOLD", "#d29922"
+        # --- BESLISSINGSLOGICA ---
+        if (ensemble > 75 or lstm > 70) and swing > 58: 
+            rec, col = "BUY", "#39d353"
+        elif ensemble < 65: 
+            rec, col = "AVOID", "#f85149"
+        else: 
+            rec, col = "HOLD", "#d29922"
         
-        return {"T": ticker, "P": curr_p, "C": change, "E": ensemble, "S": swing, "ST": rec, "COL": col, "EARN": earn}
+        return {
+            "T": ticker, "P": curr_p, "C": change, 
+            "E": ensemble, "L": lstm, "S": swing, 
+            "ST": rec, "COL": col, "EARN": earn
+        }
     except: return None
 
 # 5. Sidebar
 with st.sidebar:
-    st.header("📋 Instellingen")
-    new_input = st.text_area("Voeg tickers toe (bijv: MSFT, AMZN)")
+    st.header("📋 Watchlist")
+    new_input = st.text_area("Voeg tickers toe (komma gescheiden)")
     if st.button("Toevoegen"):
         tickers = [t.strip().upper() for t in new_input.split(",") if t.strip()]
         st.session_state.watchlist = list(dict.fromkeys(st.session_state.watchlist + tickers))
@@ -99,46 +108,49 @@ scan_ticker = st.text_input("Snel-scan Ticker", "AAPL").upper()
 if scan_ticker:
     res = run_analysis(scan_ticker)
     if res:
-        # Groene rand bij BUY
         b_col = res['COL'] if res['ST'] == "BUY" else "#333"
         st.markdown(f"""
             <div style="border: 2px solid {b_col}; padding: 15px; border-radius: 10px; background-color: #111; margin-bottom: 20px;">
                 <h2 style="color:{res['COL']}; margin:0;">{res['ST']}: {res['T']}</h2>
                 <h3 style="margin:0;">${res['P']:.2f} ({res['C']:+.2f}%)</h3>
-                <p style="margin:5px 0;">AI: {res['E']}% | Swing: {res['S']} | 📅 Earnings: <b>{res['EARN']}</b></p>
+                <p style="margin:5px 0;">
+                    <b>AI Ensemble:</b> {res['E']}% | <b>LSTM:</b> {res['L']}% | <b>Swing:</b> {res['S']}
+                </p>
+                <p style="margin:0; font-size: 0.9em;">📅 Next Earnings: <b>{res['EARN']}</b></p>
             </div>
         """, unsafe_allow_html=True)
 
-# WATCHLIST (Fragment voor Live Updates)
+# LIVE WATCHLIST (Update elke 10s)
 @st.fragment(run_every=10)
 def show_live_list():
-    st.subheader("🔄 Live Watchlist")
+    st.subheader("🔄 Live Watchlist Overzicht")
     if not st.session_state.watchlist:
-        st.info("Voeg aandelen toe in de sidebar.")
+        st.info("Geen aandelen in lijst.")
         return
 
     # Tabel Koppen
     st.markdown("""
         <div style="display: flex; font-weight: bold; border-bottom: 2px solid #444; padding: 10px; color: #39d353;">
-            <div style="width: 15%;">Ticker</div><div style="width: 15%;">Prijs</div>
-            <div style="width: 15%;">Score</div><div style="width: 15%;">Swing</div>
-            <div style="width: 20%;">Status</div><div style="width: 20%;">Earnings</div>
+            <div style="width: 12%;">Ticker</div><div style="width: 12%;">Prijs</div>
+            <div style="width: 12%;">AI Score</div><div style="width: 12%;">LSTM</div>
+            <div style="width: 12%;">Swing</div><div style="width: 15%;">Status</div>
+            <div style="width: 25%;">Earnings</div>
         </div>
     """, unsafe_allow_html=True)
 
     for ticker in st.session_state.watchlist:
         d = run_analysis(ticker)
         if d:
-            # Rij styling
             row_style = f"border: 2px solid #39d353; background-color: rgba(57, 211, 83, 0.1);" if d['ST'] == "BUY" else "border: 1px solid #222;"
             st.markdown(f"""
                 <div style="display: flex; align-items: center; padding: 10px; margin-top: 5px; border-radius: 6px; {row_style}">
-                    <div style="width: 15%; font-weight: bold;">{d['T']}</div>
-                    <div style="width: 15%;">${d['P']:.2f}</div>
-                    <div style="width: 15%;">{d['E']}%</div>
-                    <div style="width: 15%;">{d['S']}</div>
-                    <div style="width: 20%; color:{d['COL']}; font-weight:bold;">{d['ST']}</div>
-                    <div style="width: 20%; font-size: 0.9em; color: #ccc;">{d['EARN']}</div>
+                    <div style="width: 12%; font-weight: bold;">{d['T']}</div>
+                    <div style="width: 12%;">${d['P']:.2f}</div>
+                    <div style="width: 12%;">{d['E']}%</div>
+                    <div style="width: 12%;">{d['L']}%</div>
+                    <div style="width: 12%;">{d['S']}</div>
+                    <div style="width: 15%; color:{d['COL']}; font-weight:bold;">{d['ST']}</div>
+                    <div style="width: 25%; font-size: 0.85em; color: #ccc;">{d['EARN']}</div>
                 </div>
             """, unsafe_allow_html=True)
 
