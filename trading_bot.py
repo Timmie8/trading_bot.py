@@ -2,108 +2,115 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import time
+import re
 
-# 1. Pagina Configuratie & Zwarte Achtergrond
-st.set_page_config(page_title="AI Trader Black Edition", layout="wide")
+# 1. FORCEER THEMA EN LAYOUT (Dit moet bovenaan staan)
+st.set_page_config(page_title="AI Trader Black", layout="wide")
 
-# Custom CSS voor een gitzwarte achtergrond en strakke look
+# Harde CSS injectie voor gitzwarte achtergrond
 st.markdown("""
     <style>
-    /* Hoofdpagina zwart maken */
-    .stApp {
-        background-color: #000000;
-        color: #ffffff;
-    }
-    /* Sidebar zwart maken */
-    [data-testid="stSidebar"] {
-        background-color: #0a0a0a;
-        border-right: 1px solid #333;
-    }
-    /* Tekstkleuren aanpassen voor leesbaarheid */
-    h1, h2, h3, p, span {
+    /* Forceer de hoofdpagina naar zwart */
+    .stApp, [data-testid="stAppViewContainer"], .main {
+        background-color: #000000 !important;
         color: #ffffff !important;
     }
-    /* Dataframe styling */
-    .stDataFrame {
-        background-color: #111111;
-        border-radius: 10px;
+    /* Forceer de sidebar naar donkergrijs/zwart */
+    [data-testid="stSidebar"], [data-testid="stSidebarContent"] {
+        background-color: #050505 !important;
+        border-right: 1px solid #333333 !important;
     }
+    /* Alle teksten wit maken */
+    h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown {
+        color: #ffffff !important;
+    }
+    /* Input velden leesbaar maken */
+    input, textarea {
+        background-color: #1a1a1a !important;
+        color: #ffffff !important;
+        border: 1px solid #444 !important;
+    }
+    /* Verberg de Streamlit branding */
+    #MainMenu, footer, header {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
-# 2. Geheugen voor de watchlist
+# 2. Watchlist Geheugen
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = ["AAPL", "TSLA"]
 
-# 3. Functie voor Live Data
-def fetch_live_prices(ticker_list):
-    data_list = []
-    for t in ticker_list:
+# 3. Functie voor Data
+def get_data(tickers):
+    results = []
+    for t in tickers:
         try:
-            ticker = yf.Ticker(t)
-            # Haal de meest recente prijs op (1 minuut interval)
-            df = ticker.history(period="1d", interval="1m")
+            # We halen slechts 1 minuut data op voor maximale snelheid
+            tick = yf.Ticker(t)
+            df = tick.history(period="1d", interval="1m")
             if not df.empty:
-                price = df['Close'].iloc[-1]
-                change = ((price - df['Open'].iloc[0]) / df['Open'].iloc[0]) * 100
-                data_list.append({
-                    "Ticker": t,
-                    "Prijs": f"${price:.2f}",
-                    "Verschil": f"{change:+.2f}%",
-                    "Status": "🟢" if change >= 0 else "🔴"
+                last_p = df['Close'].iloc[-1]
+                open_p = df['Open'].iloc[0]
+                change = ((last_p - open_p) / open_p) * 100
+                results.append({
+                    "Aandeel": t,
+                    "Prijs": f"${last_p:.2f}",
+                    "Verschil %": f"{change:+.2f}%",
+                    "Status": "🚀" if change >= 0 else "📉"
                 })
         except:
             continue
-    return pd.DataFrame(data_list)
+    return pd.DataFrame(results)
 
-# 4. Sidebar: Meerdere tickers invoeren
+# 4. Dashboard Kop
+st.title("🏹 AI Strategy Terminal")
+
+# 5. Sidebar: De Multi-Ticker Input
 with st.sidebar:
-    st.header("🎮 Controle Paneel")
+    st.header("Watchlist Beheer")
+    st.write("Typ tickers gescheiden door een komma:")
     
-    # Gebruik een tekstveld voor directe invoer
-    multi_input = st.text_input("Voeg tickers toe (bijv: AAPL, TSLA, BTC-USD)", "")
+    # Gebruik een key voor de input zodat we deze makkelijk kunnen uitlezen
+    raw_input = st.text_input("Bijv: AAPL, TSLA, BTC-USD", key="ticker_input")
     
-    if st.button("Toevoegen"):
-        if multi_input:
-            # Splitsen op komma en schoonmaken
-            new_tickers = [t.strip().upper() for t in multi_input.split(",") if t.strip()]
-            # Toevoegen aan de lijst en dubbelen verwijderen
+    if st.button("Voeg Lijst Toe"):
+        if raw_input:
+            # De gevraagde functie: splitsen op de komma
+            new_tickers = [t.strip().upper() for t in raw_input.split(",") if t.strip()]
             st.session_state.watchlist = list(set(st.session_state.watchlist + new_tickers))
-            st.success(f"{len(new_tickers)} ticker(s) toegevoegd!")
             st.rerun()
 
-    if st.button("Lijst Wissen"):
+    if st.button("Wis Alles"):
         st.session_state.watchlist = []
         st.rerun()
 
-# 5. Live Dashboard (Update Fragment)
-st.title("🏹 AI Strategy Terminal - Live")
+# 6. LIVE UPDATE GEDEELTE
+# We gebruiken een lege container die we constant overschrijven
+placeholder = st.empty()
 
-@st.fragment(run_every=10)
-def live_watchlist_component():
-    if st.session_state.watchlist:
-        st.write(f"⏱️ Laatste live update: {time.strftime('%H:%M:%S')}")
-        
-        # Haal data op
-        df_live = fetch_live_prices(st.session_state.watchlist)
-        
-        if not df_live.empty:
-            # Toon metrics bovenaan
-            cols = st.columns(len(df_live))
-            for i, row in df_live.iterrows():
-                with cols[i]:
-                    st.metric(row['Ticker'], row['Prijs'], row['Verschil'])
+# Oneindige loop voor live updates (elke 5 seconden)
+while True:
+    with placeholder.container():
+        if st.session_state.watchlist:
+            # Haal verse prijzen op
+            df_live = get_data(st.session_state.watchlist)
             
-            # Toon de volledige tabel
-            st.write("### 📈 Markt Overzicht")
-            st.dataframe(df_live, use_container_width=True, hide_index=True)
+            if not df_live.empty:
+                st.write(f"⏱️ Live Update: {time.strftime('%H:%M:%S')}")
+                
+                # Toon metrics
+                m_cols = st.columns(len(df_live))
+                for idx, row in df_live.iterrows():
+                    with m_cols[idx % len(df_live)]:
+                        st.metric(row['Aandeel'], row['Prijs'], row['Verschil %'])
+                
+                # Toon Tabel
+                st.table(df_live)
+            else:
+                st.warning("Geen data gevonden voor deze tickers.")
         else:
-            st.warning("Wachten op data van Yahoo Finance...")
-    else:
-        st.info("Voeg tickers toe via de sidebar om te beginnen.")
-
-# Roep de fragment-functie aan
-live_watchlist_component()
+            st.info("De lijst is leeg. Voeg aandelen toe in de sidebar.")
+            
+    time.sleep(5) # Wacht 5 seconden voor de volgende update
 
 
 
