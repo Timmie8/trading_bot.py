@@ -1,116 +1,124 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import numpy as np
+from sklearn.linear_model import LinearRegression
 import time
 import re
 
-# 1. FORCEER THEMA EN LAYOUT (Dit moet bovenaan staan)
-st.set_page_config(page_title="AI Trader Black", layout="wide")
+# 1. Pagina Configuratie & Harde Black-Mode Styling
+st.set_page_config(page_title="AI Trader Pro - Live", layout="wide")
 
-# Harde CSS injectie voor gitzwarte achtergrond
 st.markdown("""
     <style>
-    /* Forceer de hoofdpagina naar zwart */
-    .stApp, [data-testid="stAppViewContainer"], .main {
-        background-color: #000000 !important;
-        color: #ffffff !important;
+    .stApp, [data-testid="stAppViewContainer"] { background-color: #000000 !important; color: #ffffff !important; }
+    [data-testid="stSidebar"] { background-color: #050505 !important; border-right: 1px solid #333 !important; }
+    h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown { color: #ffffff !important; }
+    .stTable { background-color: #000000 !important; color: #ffffff !important; }
+    /* Styling voor de score-kaarten */
+    .report-card { 
+        padding: 15px; border-radius: 10px; background-color: #111; 
+        border-left: 5px solid #444; margin-bottom: 10px;
     }
-    /* Forceer de sidebar naar donkergrijs/zwart */
-    [data-testid="stSidebar"], [data-testid="stSidebarContent"] {
-        background-color: #050505 !important;
-        border-right: 1px solid #333333 !important;
-    }
-    /* Alle teksten wit maken */
-    h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown {
-        color: #ffffff !important;
-    }
-    /* Input velden leesbaar maken */
-    input, textarea {
-        background-color: #1a1a1a !important;
-        color: #ffffff !important;
-        border: 1px solid #444 !important;
-    }
-    /* Verberg de Streamlit branding */
-    #MainMenu, footer, header {visibility: hidden;}
     </style>
     """, unsafe_allow_html=True)
 
-# 2. Watchlist Geheugen
+# 2. Geheugen voor de Watchlist
 if 'watchlist' not in st.session_state:
-    st.session_state.watchlist = ["AAPL", "TSLA"]
+    st.session_state.watchlist = ["AAPL", "NVDA"]
 
-# 3. Functie voor Data
-def get_data(tickers):
-    results = []
-    for t in tickers:
-        try:
-            # We halen slechts 1 minuut data op voor maximale snelheid
-            tick = yf.Ticker(t)
-            df = tick.history(period="1d", interval="1m")
-            if not df.empty:
-                last_p = df['Close'].iloc[-1]
-                open_p = df['Open'].iloc[0]
-                change = ((last_p - open_p) / open_p) * 100
-                results.append({
-                    "Aandeel": t,
-                    "Prijs": f"${last_p:.2f}",
-                    "Verschil %": f"{change:+.2f}%",
-                    "Status": "🚀" if change >= 0 else "📉"
-                })
-        except:
-            continue
-    return pd.DataFrame(results)
+# 3. De AI-Analyse Functie (Teruggehaald uit je originele code)
+def perform_ai_analysis(ticker_symbol):
+    try:
+        data = yf.Ticker(ticker_symbol).history(period="100d")
+        if data.empty: return None
+        
+        curr_p = float(data['Close'].iloc[-1])
+        prev_p = float(data['Close'].iloc[-2])
+        change = ((curr_p / prev_p) - 1) * 100
+        
+        # AI Trend Voorspelling (Linear Regression)
+        y = data['Close'].values.reshape(-1, 1)
+        X = np.array(range(len(y))).reshape(-1, 1)
+        reg = LinearRegression().fit(X, y)
+        pred = float(reg.predict(np.array([[len(y)]]))[0][0])
+        
+        # Berekeningen voor de scores
+        ensemble = int(72 + (12 if pred > curr_p else -8))
+        vola = data['Close'].pct_change().tail(14).std() * 100
+        swing_score = 50 + (change * 6) - (vola * 4)
+        
+        # Bepaal status
+        if ensemble > 75 and swing_score > 58: rec, col, ico = "BUY", "#39d353", "🚀"
+        elif ensemble < 65: rec, col, ico = "AVOID", "#f85149", "⚠️"
+        else: rec, col, ico = "HOLD", "#d29922", "⏳"
+        
+        return {
+            "Ticker": ticker_symbol,
+            "Prijs": round(curr_p, 2),
+            "Change %": round(change, 2),
+            "Ensemble": ensemble,
+            "Swing": round(swing_score, 1),
+            "Status": f"{ico} {rec}",
+            "Kleur": col
+        }
+    except:
+        return None
 
-# 4. Dashboard Kop
-st.title("🏹 AI Strategy Terminal")
-
-# 5. Sidebar: De Multi-Ticker Input
+# 4. Sidebar: Meerdere aandelen toevoegen via komma
 with st.sidebar:
-    st.header("Watchlist Beheer")
-    st.write("Typ tickers gescheiden door een komma:")
+    st.header("📋 Watchlist")
+    multi_input = st.text_input("Voeg tickers toe (bijv: AAPL,TSLA,BTC-USD)", key="input")
     
-    # Gebruik een key voor de input zodat we deze makkelijk kunnen uitlezen
-    raw_input = st.text_input("Bijv: AAPL, TSLA, BTC-USD", key="ticker_input")
-    
-    if st.button("Voeg Lijst Toe"):
-        if raw_input:
-            # De gevraagde functie: splitsen op de komma
-            new_tickers = [t.strip().upper() for t in raw_input.split(",") if t.strip()]
-            st.session_state.watchlist = list(set(st.session_state.watchlist + new_tickers))
+    if st.button("Bijwerken"):
+        if multi_input:
+            new_list = [t.strip().upper() for t in multi_input.split(",") if t.strip()]
+            st.session_state.watchlist = list(dict.fromkeys(st.session_state.watchlist + new_list))
             st.rerun()
-
-    if st.button("Wis Alles"):
+            
+    if st.button("Lijst wissen"):
         st.session_state.watchlist = []
         st.rerun()
 
-# 6. LIVE UPDATE GEDEELTE
-# We gebruiken een lege container die we constant overschrijven
-placeholder = st.empty()
+# 5. Hoofd Dashboard (Live Fragment)
+st.title("🏹 AI Strategy Terminal")
 
-# Oneindige loop voor live updates (elke 5 seconden)
-while True:
-    with placeholder.container():
-        if st.session_state.watchlist:
-            # Haal verse prijzen op
-            df_live = get_data(st.session_state.watchlist)
-            
-            if not df_live.empty:
-                st.write(f"⏱️ Live Update: {time.strftime('%H:%M:%S')}")
-                
-                # Toon metrics
-                m_cols = st.columns(len(df_live))
-                for idx, row in df_live.iterrows():
-                    with m_cols[idx % len(df_live)]:
-                        st.metric(row['Aandeel'], row['Prijs'], row['Verschil %'])
-                
-                # Toon Tabel
-                st.table(df_live)
-            else:
-                st.warning("Geen data gevonden voor deze tickers.")
-        else:
-            st.info("De lijst is leeg. Voeg aandelen toe in de sidebar.")
-            
-    time.sleep(5) # Wacht 5 seconden voor de volgende update
+@st.fragment(run_every=10)
+def show_dashboard():
+    if not st.session_state.watchlist:
+        st.info("Voeg tickers toe in de sidebar.")
+        return
+
+    st.write(f"⏱️ Laatste Update: {time.strftime('%H:%M:%S')}")
+    
+    analysis_results = []
+    for t in st.session_state.watchlist:
+        res = perform_ai_analysis(t)
+        if res:
+            analysis_results.append(res)
+    
+    if analysis_results:
+        # Maak een DataFrame voor de tabel
+        df = pd.DataFrame(analysis_results)
+        
+        # Toon de cruciale tabel met alle scores
+        st.table(df[['Ticker', 'Prijs', 'Change %', 'Ensemble', 'Swing', 'Status']])
+        
+        # Visuele kaarten
+        st.write("---")
+        cols = st.columns(min(len(analysis_results), 4))
+        for i, item in enumerate(analysis_results):
+            with cols[i % 4]:
+                st.markdown(f"""
+                    <div style="padding:15px; border-radius:10px; background-color:#111; border-top: 4px solid {item['Kleur']};">
+                        <h3 style="margin:0;">{item['Ticker']}</h3>
+                        <p style="font-size:1.5em; font-weight:bold; margin:0;">${item['Prijs']}</p>
+                        <p style="color:{item['Kleur']};">Score: {item['Ensemble']}% | {item['Status']}</p>
+                    </div>
+                """, unsafe_allow_html=True)
+
+# Start de live weergave
+show_dashboard()
 
 
 
