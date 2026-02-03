@@ -6,24 +6,57 @@ from sklearn.linear_model import LinearRegression
 import time
 import re
 
-# 1. Pagina Configuratie & Harde Black-Mode Styling
+# 1. Pagina Configuratie
 st.set_page_config(page_title="AI Trader Pro - Live", layout="wide")
 
+# 2. Geavanceerde CSS voor Contrast en Layout
 st.markdown("""
     <style>
-    .stApp, [data-testid="stAppViewContainer"] { background-color: #000000 !important; color: #ffffff !important; }
-    [data-testid="stSidebar"] { background-color: #050505 !important; border-right: 1px solid #333 !important; }
-    h1, h2, h3, h4, h5, h6, p, label, span, .stMarkdown { color: #ffffff !important; }
-    .stTable { background-color: #000000 !important; color: #ffffff !important; }
+    /* Hoofdpagina en Sidebar */
+    .stApp { background-color: #000000 !important; }
+    [data-testid="stSidebar"] { background-color: #0a0a0a !important; border-right: 1px solid #333 !important; }
+    
+    /* Tekst kleuren */
+    h1, h2, h3, p, label, span { color: #ffffff !important; }
+    
+    /* KNOPPEN CONTRAST: Duidelijk zichtbaar maken */
+    .stButton>button {
+        background-color: #222222 !important;
+        color: #ffffff !important;
+        border: 1px solid #444444 !important;
+        border-radius: 5px;
+        width: 100%;
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        background-color: #333333 !important;
+        border-color: #39d353 !important;
+        color: #39d353 !important;
+    }
+
+    /* Input velden contrast */
+    .stTextInput>div>div>input {
+        background-color: #111111 !important;
+        color: #ffffff !important;
+        border: 1px solid #444 !important;
+    }
+
+    /* Tabel layout verbetering */
+    .stTable { 
+        background-color: #000000 !important; 
+        border: 1px solid #333 !important;
+    }
+    
+    /* Metrics kleur forceren */
     [data-testid="stMetricValue"] { color: #ffffff !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. FIX VOOR TYPEERROR: Zorg dat watchlist ALTIJD een lijst is
+# 3. Watchlist Management (Lijst fix)
 if 'watchlist' not in st.session_state or not isinstance(st.session_state.watchlist, list):
-    st.session_state.watchlist = ["AAPL", "NVDA"]
+    st.session_state.watchlist = ["AAPL", "NVDA", "TSLA"]
 
-# 3. AI-Analyse Functie
+# 4. AI-Analyse Functie
 def perform_ai_analysis(ticker_symbol):
     try:
         data = yf.Ticker(ticker_symbol).history(period="100d")
@@ -33,7 +66,6 @@ def perform_ai_analysis(ticker_symbol):
         prev_p = float(data['Close'].iloc[-2])
         change = ((curr_p / prev_p) - 1) * 100
         
-        # AI Trend Voorspelling
         y = data['Close'].values.reshape(-1, 1)
         X = np.array(range(len(y))).reshape(-1, 1)
         reg = LinearRegression().fit(X, y)
@@ -49,44 +81,49 @@ def perform_ai_analysis(ticker_symbol):
         
         return {
             "Ticker": ticker_symbol,
-            "Prijs": round(curr_p, 2),
-            "Change %": round(change, 2),
-            "Ensemble": ensemble,
+            "Prijs": f"${curr_p:.2f}",
+            "Change %": f"{change:+.2f}%",
+            "Score": f"{ensemble}%",
             "Swing": round(swing_score, 1),
-            "Status": f"{ico} {rec}",
+            "Advies": f"{ico} {rec}",
             "Kleur": col
         }
     except:
         return None
 
-# 4. Sidebar: Meerdere aandelen toevoegen
+# 5. Sidebar Layout
 with st.sidebar:
-    st.header("📋 Watchlist")
-    multi_input = st.text_input("Voeg tickers toe (bijv: AAPL,TSLA,NVDA)", key="input")
+    st.header("📋 Watchlist Beheer")
+    st.markdown("---")
     
-    if st.button("Bijwerken"):
-        if multi_input:
-            # Maak een lijst van de input
-            new_list = [t.strip().upper() for t in multi_input.split(",") if t.strip()]
-            # Voeg samen en verwijder duplicaten
-            current_list = st.session_state.watchlist
-            st.session_state.watchlist = list(dict.fromkeys(current_list + new_list))
+    multi_input = st.text_input("Nieuwe tickers (komma gescheiden)", placeholder="bijv: META, AMZN, BTC-USD")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Toevoegen"):
+            if multi_input:
+                new_list = [t.strip().upper() for t in multi_input.split(",") if t.strip()]
+                st.session_state.watchlist = list(dict.fromkeys(st.session_state.watchlist + new_list))
+                st.rerun()
+    with col2:
+        if st.button("Lijst Wissen"):
+            st.session_state.watchlist = []
             st.rerun()
-            
-    if st.button("Lijst wissen"):
-        st.session_state.watchlist = []
-        st.rerun()
+    
+    st.markdown("---")
+    st.caption("Live updates elke 10 seconden.")
 
-# 5. Dashboard (Live fragment voor updates zonder refresh)
+# 6. Hoofd Dashboard (Live Fragment)
 st.title("🏹 AI Strategy Terminal")
 
 @st.fragment(run_every=10)
 def show_dashboard():
     if not st.session_state.watchlist:
-        st.info("De watchlist is leeg.")
+        st.info("De watchlist is momenteel leeg. Voeg tickers toe in de sidebar.")
         return
 
-    st.write(f"⏱️ Live Update: {time.strftime('%H:%M:%S')}")
+    # Header met tijdstempel
+    st.write(f"⏱️ **Live Markt Update:** {time.strftime('%H:%M:%S')}")
     
     analysis_results = []
     for t in st.session_state.watchlist:
@@ -95,17 +132,27 @@ def show_dashboard():
             analysis_results.append(res)
     
     if analysis_results:
+        # Tabel weergeven
         df = pd.DataFrame(analysis_results)
-        # Toon de tabel met alle cruciale scores
-        st.table(df[['Ticker', 'Prijs', 'Change %', 'Ensemble', 'Swing', 'Status']])
+        # Verwijder kleur kolom uit de tabel weergave
+        display_df = df.drop(columns=['Kleur'])
+        st.table(display_df)
         
-        # Metrics voor snelle blik
+        # Grid layout voor visuele status
+        st.subheader("🔥 Top Focus")
         cols = st.columns(min(len(analysis_results), 4))
-        for i, item in enumerate(analysis_results[:8]): # Max 8 metrics tonen
+        for i, item in enumerate(analysis_results[:8]):
             with cols[i % 4]:
-                st.metric(item['Ticker'], f"${item['Prijs']}", f"{item['Change %']}%")
+                st.markdown(f"""
+                    <div style="padding:10px; border-radius:8px; background-color:#111; border: 1px solid {item['Kleur']}; margin-bottom:10px;">
+                        <h4 style="margin:0; color:{item['Kleur']} !important;">{item['Ticker']}</h4>
+                        <p style="font-size:1.2em; font-weight:bold; margin:0;">{item['Prijs']}</p>
+                        <p style="margin:0; font-size:0.9em;">Score: {item['Score']}</p>
+                    </div>
+                """, unsafe_allow_html=True)
 
 show_dashboard()
+
 
 
 
